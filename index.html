@@ -261,6 +261,13 @@ body.nobg #bg{opacity:0}
 }
 body.victory #rays{opacity:1}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* Пока победное видео едет по сети, экран не должен быть пустым:
+   под ним лежит тёплый градиент, видео проявляется поверх него. */
+body.victory{
+  background:linear-gradient(160deg,#4a1330,#7d1f3d,#b8452a,#5c1a46,#241238);
+  background-size:300% 300%;
+  animation:festGrad 26s ease-in-out infinite;
+}
 
 .win-title{
   font-family:"Arial Black",Impact,"Segoe UI",sans-serif;
@@ -548,9 +555,12 @@ body.finale #finalBg{display:block}
 </head>
 <body>
 
+<!-- preload только у вступления: остальные подгружаются заранее, но по
+     очереди (см. warm() в скрипте). Иначе на мобильном интернете страница
+     разом тянет 16 МБ и видео не успевает приехать к своему экрану. -->
 <video id="introVid"  class="bgvid" muted loop autoplay playsinline preload="auto" src="vid/intro.mp4"></video>
-<video id="forestVid" class="bgvid" muted loop playsinline preload="auto" src="vid/forest.mp4"></video>
-<video id="winBg"     class="bgvid" loop playsinline preload="auto" src="vid/win.mp4"></video>
+<video id="forestVid" class="bgvid" muted loop playsinline preload="metadata" src="vid/forest.mp4"></video>
+<video id="winBg"     class="bgvid" loop playsinline preload="metadata" src="vid/win.mp4"></video>
 <div id="vignette"></div>
 <div id="rays"></div>
 <div id="bg"></div>
@@ -843,7 +853,7 @@ function fanfare(){
    fail.mp3  — спанчбоб-фейл, когда выбрал не то                      */
 const SND={ scary:new Audio('snd/scary.mp3'), fail:new Audio('snd/fail.mp3') };
 SND.scary.loop=true; SND.scary.volume=.5; SND.fail.volume=.9;
-SND.scary.preload='auto'; SND.fail.preload='auto';
+SND.scary.preload='none'; SND.fail.preload='none';
 function play(a,vol){ if(muted)return; try{ if(vol!=null)a.volume=vol; a.currentTime=0; a.play().catch(()=>{}); }catch(e){} }
 function stopSnd(a){ try{ a.pause(); a.currentTime=0; }catch(e){} }
 
@@ -1010,11 +1020,28 @@ function killIntroVideo(){
 const forestVid=$('#forestVid'), winBg=$('#winBg');
 forestVid.volume=0; winBg.volume=1;
 
+/* Начать подтягивать медиа заранее, не дожидаясь его экрана. */
+function warm(m){
+  if(!m||m.dataset.warmed) return;
+  m.dataset.warmed='1';
+  try{ m.preload='auto'; m.load(); }catch(e){}
+}
+
 function bgVideoOn(v,withSound){
   v.muted = withSound ? muted : true;
-  try{ v.currentTime=0; }catch(e){}
-  const p=v.play();
-  if(p&&p.catch) p.catch(()=>{ v.muted=true; v.play().catch(()=>{}); });
+  // currentTime трогаем только у готового: на недокачанном это лишний
+  // seek, из-за которого старт откладывается ещё дольше
+  if(v.readyState>=2){ try{ v.currentTime=0; }catch(e){} }
+  const go=()=>{
+    const p=v.play();
+    if(p&&p.catch) p.catch(()=>{ v.muted=true; v.play().catch(()=>{}); });
+  };
+  go();
+  // не приехало — покажем, как только появятся первые кадры
+  if(v.readyState<3){
+    warm(v);
+    v.addEventListener('canplay',go,{once:true});
+  }
   v.classList.add('on');
 }
 function bgVideoOff(v){
@@ -1029,6 +1056,7 @@ function bgVideoOff(v){
 $('#go').onclick=()=>{
   ac(); blip(760,.09); setTimeout(()=>blip(1040,.12),90);
   armIntroSound(); show('#s-prank'); layout();
+  warm(forestVid); warm(SND.scary); warm(SND.fail);   // понадобятся на следующем экране
 };
 document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&$('#s-start').classList.contains('on'))$('#go').click(); });
 
@@ -1099,6 +1127,7 @@ function accept(){
   // фоновое видео доживает до этого момента — дальше лес, страшная музыка и мрак
   setTimeout(()=>{
     killIntroVideo();
+    warm(winBg);                          // качаем победное видео заранее
     document.body.classList.add('dark');   // гасит шарики и пятна, усиливает затемнение
     bgVideoOn(forestVid,false);            // лес — всегда без звука
     show('#s-choice');
@@ -1248,15 +1277,15 @@ const FACE_CROP={cx:.5, cy:.55};
 let faceImg=null, voenImg=null, assetsReady=false;
 
 const CHASE=new Audio('snd/chase.mp3');
-CHASE.loop=true; CHASE.volume=.35; CHASE.preload='auto';   // «не очень громко»
+CHASE.loop=true; CHASE.volume=.35; CHASE.preload='none';   // «не очень громко»
 
 // свой саундтрек для «Хлопни Субо»
 const SUBOTRACK=new Audio('snd/subo.mp3');
-SUBOTRACK.loop=true; SUBOTRACK.volume=.35; SUBOTRACK.preload='auto';
+SUBOTRACK.loop=true; SUBOTRACK.volume=.35; SUBOTRACK.preload='none';
 
 // музыка для экранов брифинга и победы мини-игр
 const MUS=new Audio('snd/music2017.mp3');
-MUS.loop=true; MUS.volume=.4; MUS.preload='auto';
+MUS.loop=true; MUS.volume=.4; MUS.preload='none';
 function musOn(){ if(muted)return; try{ MUS.play().catch(()=>{}); }catch(e){} }
 function musOff(){ try{ MUS.pause(); MUS.currentTime=0; }catch(e){} }
 
@@ -1688,7 +1717,7 @@ $('#toStage2').onclick=()=>{
   bgVideoOff(winBg);
   document.body.classList.remove('victory');
   cvs.style.display='none'; parts=[];
-  show('#s-stage2'); musOn();
+  show('#s-stage2'); musOn(); warm(CHASE);
 };
 $('#startG1').onclick=()=>{
   if(!assetsReady) toast('секунду, картинки грузятся...',1200);
@@ -1961,7 +1990,7 @@ $('#startG2').onclick=()=>{
 hangTitle($('#g3title'),'Лови подарки',3);
 
 const GAITI=new Audio('snd/gaiti.mp3');
-GAITI.loop=true; GAITI.volume=.2; GAITI.preload='auto';   // просили потише
+GAITI.loop=true; GAITI.volume=.2; GAITI.preload='none';   // просили потише
 
 let G3W=960, G3H=560, G3FLOOR=498;
 const gc3=$('#gc3'), gx3=gc3.getContext('2d');
@@ -2188,7 +2217,7 @@ function draw3(t){
 hangTitle($('#g4title'),'Задуй свечи',3);
 
 const CAKEMUS=new Audio('snd/cake.mp3');
-CAKEMUS.loop=true; CAKEMUS.volume=.32; CAKEMUS.preload='auto';
+CAKEMUS.loop=true; CAKEMUS.volume=.32; CAKEMUS.preload='none';
 
 let G4W=960, G4H=560;
 const gc4=$('#gc4'), gx4=gc4.getContext('2d');
@@ -2449,7 +2478,7 @@ function draw4(t){
 $('#toGifts').onclick=()=>{
   document.body.classList.remove('victory');
   cvs.style.display='none'; parts=[];
-  show('#s-stage-gifts'); musOn();
+  show('#s-stage-gifts'); musOn(); warm(GAITI);
 };
 $('#startG3').onclick=()=>{
   if(!assetsReady) toast('секунду, картинки грузятся...',1200);
@@ -2458,12 +2487,12 @@ $('#startG3').onclick=()=>{
 $('#toSubo').onclick=()=>{
   document.body.classList.remove('victory');
   cvs.style.display='none'; parts=[];
-  show('#s-stage3'); musOn();
+  show('#s-stage3'); musOn(); warm(SUBOTRACK);
 };
 $('#toCake').onclick=()=>{
   document.body.classList.remove('victory');
   cvs.style.display='none'; parts=[];
-  show('#s-stage-cake'); musOn();
+  show('#s-stage-cake'); musOn(); warm(CAKEMUS); warm(ALLEGROVA);
 };
 $('#startG4').onclick=()=>{
   if(!assetsReady) toast('секунду, картинки грузятся...',1200);
@@ -2474,7 +2503,7 @@ $('#startG4').onclick=()=>{
    ФИНАЛ: фейерверк + сердечки + буквы, прилетающие на шариках
    ============================================================ */
 const ALLEGROVA=new Audio('snd/final.mp3');
-ALLEGROVA.loop=true; ALLEGROVA.volume=.45; ALLEGROVA.preload='auto';
+ALLEGROVA.loop=true; ALLEGROVA.volume=.45; ALLEGROVA.preload='none';
 
 const fw=$('#fw'), fx=fw.getContext('2d');
 const GREET='С ДНЁМ РОЖДЕНИЯ, БОГДАН!';
